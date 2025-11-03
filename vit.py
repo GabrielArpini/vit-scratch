@@ -36,9 +36,25 @@ class Attention(nn.Module):
         return self.out(out)
 
 class Transformer(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, d_model,N, h, ff_hidden_dim):
         super().__init__()
-        self.scale = dim ** -0.5
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.layers = nn.ModuleList([])
+        for _ in range(N):
+            self.layers.append(nn.ModuleList([
+                Attention(d_model,h),
+                FeedForward(d_model, ff_hidden_dim)
+            ]))
+    def forward(self, x):
+        for attn, ff in self.layers:
+            x = attn(x) + x 
+            x = self.norm1(x)
+            x = ff(x) + x 
+            x = self.norm2(x)
+        return x
+
+
 
 
 class ViT(nn.Module):

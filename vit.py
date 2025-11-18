@@ -2,6 +2,21 @@ import torch
 import torch.nn as nn 
 from einops import rearrange
 
+
+# Lucidrains positional embedding implementation.
+
+def posemb_sincos_2d(h, w, dim, temperature: int = 10000, dtype = torch.float32):
+    y, x = torch.meshgrid(torch.arange(h), torch.arange(w), indexing="ij")
+    assert (dim % 4) == 0, "feature dimension must be multiple of 4 for sincos emb"
+    omega = torch.arange(dim // 4) / (dim // 4 - 1)
+    omega = 1.0 / (temperature ** omega)
+
+    y = y.flatten()[:, None] * omega[None, :]
+    x = x.flatten()[:, None] * omega[None, :]
+    pe = torch.cat((x.sin(), x.cos(), y.sin(), y.cos()), dim=1)
+    return pe.type(dtype)
+
+
 class FeedForward(nn.Module):
     def __init__(self,dim, hidden_dim):
         super().__init__()
@@ -58,8 +73,29 @@ class Transformer(nn.Module):
 
 
 class ViT(nn.Module):
-    def __init__(self, P: int):
-        super(ViT, self).__init__()
-        patch_height, patch_width = (P,P)
+    def __init__(self, P: int, C: int, d_model:int, H: int, W: int, num_classes: int):
+        super(ViT, self).__init__() 
+        # Very cool way to extract the patches of the image and also do the Linear projection 
+        self.extract_patches = nn.Conv2d(in_channels=C, out_channels=d_model, kernel_size=P, stride=P)
+        self.pos_embedding = posemb_sincos_2d(
+            h = H // P,
+            w = W // P,
+            dim = d_model,
+        ) 
+        self.transformer = Transformer(d_model=d_model,N=8,h=8,ff_hidden_dim=128)
+        self.linear_classify = nn.Linear(d_model, num_classes)
 
+
+    
+    def forward(self, x):
+        device = x.device 
+        x = self.extract_patches(x)
+        # extraction will return dim: (b, d_model, p, p).
+        x = rearrange(x,'b d h w -> b (h w) d') # Rearrange the extracted dim to: (b, N, d_model)
+        x += self.pos_embedding.to(device, dtype=x.dtype) # Add positional embeddings values 
+        x = self.transformer(x) # Pass through the transformer architecture 
+        x = x.mean(dim=1) # Get the mean of the N values to use in the classification 
+        return self.linear_classify(x)
+        
+    
         
